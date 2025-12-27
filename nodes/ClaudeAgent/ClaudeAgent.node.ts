@@ -11,15 +11,12 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Options, HookCallbackMatcher, HookInput } from '@anthropic-ai/claude-agent-sdk';
 
 interface CapturedData {
-	todos: Array<{ content: string; status: string; activeForm: string }>;
 	toolsUsed: Array<{ name: string; input: any; output: any; timestamp: string }>;
-	subagents: Array<{ type: string; prompt: string; result: string }>;
 }
 
 interface NodeOptions {
 	enableWebSearch?: boolean;
 	enableWebFetch?: boolean;
-	enableTask?: boolean;
 	maxTurns?: number;
 	customContext?: string;
 	includeToolDetails?: boolean;
@@ -109,13 +106,6 @@ export class ClaudeAgent implements INodeType {
 						description: 'Whether to allow the agent to fetch and parse web pages',
 					},
 					{
-						displayName: 'Enable Task Tool',
-						name: 'enableTask',
-						type: 'boolean',
-						default: false,
-						description: 'Whether to allow the agent to spawn subagents for complex tasks',
-					},
-					{
 						displayName: 'Max Turns',
 						name: 'maxTurns',
 						type: 'number',
@@ -194,9 +184,6 @@ export class ClaudeAgent implements INodeType {
 		if (options.enableWebFetch) {
 			allowedTools.push('WebFetch');
 		}
-		if (options.enableTask !== false) {
-			allowedTools.push('Task');
-		}
 
 		// Note: File system tools (Read, Write, Edit, Glob, Grep, Bash) are intentionally excluded
 		// as N8N workflows don't have access to the file system
@@ -209,7 +196,6 @@ export class ClaudeAgent implements INodeType {
 	 */
 	private static createCaptureHook(capturedData: CapturedData, options: NodeOptions) {
 		return async (input_data: HookInput) => {
-			console.log('Tool use:', input_data)
 			if (input_data.hook_event_name === 'PostToolUse') {
 				const toolName = input_data.tool_name;
 				const toolInput = input_data.tool_input;
@@ -224,22 +210,6 @@ export class ClaudeAgent implements INodeType {
 						timestamp: new Date().toISOString(),
 					});
 				}
-
-				// Handle TodoWrite - capture todos
-				if (toolName === 'TodoWrite' && typeof toolInput === 'object' && toolInput !== null && 'todos' in toolInput) {
-					capturedData.todos = (toolInput as any).todos;
-				}
-
-				// Handle Task tool - capture subagent results
-				if (toolName === 'Task' && typeof toolInput === 'object' && toolInput !== null && 'subagent_type' in toolInput) {
-					const taskInput = toolInput as any;
-					capturedData.subagents.push({
-						type: taskInput.subagent_type,
-						prompt: taskInput.prompt,
-						result: toolResponse as string || 'Running...',
-					});
-				}
-
 			}
 			return {};
 		};
@@ -280,7 +250,7 @@ export class ClaudeAgent implements INodeType {
 		options: NodeOptions,
 		captureHook: (input_data: HookInput) => Promise<{}>
 	): Options {
-		const agentOptions: Options = {
+		return {
 			allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
 			model: ClaudeAgent.getModelIdentifier(model),
 			maxTurns: options.maxTurns || 10,
@@ -292,8 +262,6 @@ export class ClaudeAgent implements INodeType {
 				],
 			},
 		};
-
-		return agentOptions;
 	}
 
 	/**
@@ -368,8 +336,6 @@ export class ClaudeAgent implements INodeType {
 					turns: executionResult.turns,
 					executionTime: executionResult.executionTime,
 					tokensUsed: executionResult.tokensUsed,
-					...(capturedData.todos.length > 0 && { todos: capturedData.todos }),
-					...(capturedData.subagents.length > 0 && { subagents: capturedData.subagents }),
 					...(options.includeToolDetails &&
 						capturedData.toolsUsed.length > 0 && { toolsUsed: capturedData.toolsUsed }),
 				},
@@ -391,9 +357,7 @@ export class ClaudeAgent implements INodeType {
 
 				// Prepare captured data structure
 				const capturedData: CapturedData = {
-					todos: [],
 					toolsUsed: [],
-					subagents: [],
 				};
 
 				// Build configuration

@@ -74,13 +74,6 @@ The node outputs data in the following format:
     "turns": 5,
     "executionTime": 12500,
     "tokensUsed": 4523,
-    "todos": [
-      {
-        "content": "Research AI news",
-        "status": "completed",
-        "activeForm": "Researching AI news"
-      }
-    ],
     "toolsUsed": [
       {
         "name": "WebSearch",
@@ -204,7 +197,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 - Initial release
 - Claude Agent SDK integration
-- Web Search, Web Fetch, and Task tools
+- Web Search and Web Fetch tools
 - Model selection (Sonnet, Opus, Haiku)
 - Configurable options for agent behavior
 - Rich output with execution metadata

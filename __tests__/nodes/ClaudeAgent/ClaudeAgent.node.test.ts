@@ -1,5 +1,5 @@
 import { ClaudeAgent } from '../../../nodes/ClaudeAgent/ClaudeAgent.node';
-import type { INodeExecutionData, ILoadOptionsFunctions } from 'n8n-workflow';
+import type { ILoadOptionsFunctions } from 'n8n-workflow';
 
 // Mock the Claude Agent SDK
 jest.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -19,8 +19,7 @@ describe('ClaudeAgent', () => {
 				const options = {
 					enableWebSearch: false,
 					enableWebFetch: false,
-					enableTask: false,
-				};
+									};
 
 				const result = (ClaudeAgent as any).buildAllowedTools(options);
 
@@ -31,8 +30,7 @@ describe('ClaudeAgent', () => {
 				const options = {
 					enableWebSearch: true,
 					enableWebFetch: false,
-					enableTask: false,
-				};
+									};
 
 				const result = (ClaudeAgent as any).buildAllowedTools(options);
 
@@ -44,8 +42,7 @@ describe('ClaudeAgent', () => {
 				const options = {
 					enableWebSearch: false,
 					enableWebFetch: true,
-					enableTask: false,
-				};
+									};
 
 				const result = (ClaudeAgent as any).buildAllowedTools(options);
 
@@ -53,7 +50,7 @@ describe('ClaudeAgent', () => {
 				expect(result).toHaveLength(1);
 			});
 
-			it('should include Task when not explicitly disabled', () => {
+			it('should return empty array when Task is not available', () => {
 				const options = {
 					enableWebSearch: false,
 					enableWebFetch: false,
@@ -61,23 +58,20 @@ describe('ClaudeAgent', () => {
 
 				const result = (ClaudeAgent as any).buildAllowedTools(options);
 
-				expect(result).toContain('Task');
-				expect(result).toHaveLength(1);
+			expect(result).toHaveLength(0);
 			});
 
 			it('should include all enabled tools', () => {
 				const options = {
 					enableWebSearch: true,
 					enableWebFetch: true,
-					enableTask: true,
-				};
+									};
 
 				const result = (ClaudeAgent as any).buildAllowedTools(options);
 
 				expect(result).toContain('WebSearch');
 				expect(result).toContain('WebFetch');
-				expect(result).toContain('Task');
-				expect(result).toHaveLength(3);
+					expect(result).toHaveLength(2);
 			});
 		});
 
@@ -243,7 +237,6 @@ describe('ClaudeAgent', () => {
 
 			expect(optionNames).toContain('enableWebSearch');
 			expect(optionNames).toContain('enableWebFetch');
-			expect(optionNames).toContain('enableTask');
 			expect(optionNames).toContain('maxTurns');
 			expect(optionNames).toContain('customContext');
 			expect(optionNames).toContain('includeToolDetails');
