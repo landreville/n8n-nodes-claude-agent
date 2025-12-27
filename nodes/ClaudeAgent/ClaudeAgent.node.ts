@@ -9,8 +9,6 @@ import type {
 import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Options, HookCallbackMatcher, HookInput } from '@anthropic-ai/claude-agent-sdk';
-import { betaMemoryTool, type MemoryToolHandlers } from '@anthropic-ai/sdk/helpers/beta/memory';
-import type { BetaMemoryTool20250818Command } from '@anthropic-ai/sdk/resources/beta';
 
 interface CapturedData {
 	todos: Array<{ content: string; status: string; activeForm: string }>;
@@ -22,7 +20,6 @@ interface NodeOptions {
 	enableWebSearch?: boolean;
 	enableWebFetch?: boolean;
 	enableTask?: boolean;
-	enableMemory?: boolean;
 	maxTurns?: number;
 	customContext?: string;
 	includeToolDetails?: boolean;
@@ -33,206 +30,6 @@ interface AgentExecutionResult {
 	turns: number;
 	tokensUsed: number;
 	executionTime: number;
-}
-
-/**
- * In-memory implementation of the Memory Tool for n8n
- * Stores memory in a JSON-serializable structure instead of filesystem
- */
-export class InMemoryMemoryTool implements MemoryToolHandlers {
-	private files: Map<string, string> = new Map();
-
-	constructor(memoryState?: string) {
-		if (memoryState) {
-			try {
-				const state = JSON.parse(memoryState);
-				this.files = new Map(Object.entries(state));
-				console.log(this.files)
-			} catch (error) {
-				// Invalid state, start fresh
-			}
-		}
-	}
-
-	/** Serialize the current memory state to JSON */
-	serialize(): string {
-		return JSON.stringify(Object.fromEntries(this.files));
-	}
-
-	/** Check if there is any memory stored */
-	hasMemory(): boolean {
-		return this.files.size > 0;
-	}
-
-	private validatePath(memoryPath: string): string {
-		if (!memoryPath.startsWith('/memories')) {
-			throw new Error(`Path must start with /memories, got: ${memoryPath}`);
-		}
-
-		// Remove /memories prefix and normalize
-		const relativePath = memoryPath.slice('/memories'.length).replace(/^\//, '');
-		return relativePath || '';
-	}
-
-	async view(command: Extract<BetaMemoryTool20250818Command, { command: 'view' }>): Promise<string> {
-		console.log('Viewing memory')
-		const path = this.validatePath(command.path);
-
-		// Handle directory listing
-		if (command.path === '/memories' || command.path === '/memories/') {
-			const pathSet = new Set<string>();
-
-			for (const filePath of this.files.keys()) {
-				if (filePath === '') continue; // Skip root
-
-				const parts = filePath.split('/');
-				if (parts.length > 0) {
-					pathSet.add(parts[0] + (parts.length > 1 ? '/' : ''));
-				}
-			}
-
-			const sortedItems = Array.from(pathSet).sort();
-			return `Directory: ${command.path}\n` + sortedItems.map(item => `- ${item}`).join('\n');
-		}
-
-		// Check if it's a directory (has children)
-		const children: string[] = [];
-		for (const filePath of this.files.keys()) {
-			if (filePath.startsWith(path + '/')) {
-				const remaining = filePath.slice(path.length + 1);
-				const nextPart = remaining.split('/')[0];
-				if (nextPart && !children.includes(nextPart)) {
-					children.push(nextPart);
-				}
-			}
-		}
-
-		if (children.length > 0) {
-			// It's a directory
-			return `Directory: ${command.path}\n` + children.sort().map(item => {
-				const fullPath = path ? `${path}/${item}` : item;
-				const hasChildren = Array.from(this.files.keys()).some(p => p.startsWith(fullPath + '/'));
-				return `- ${item}${hasChildren ? '/' : ''}`;
-			}).join('\n');
-		}
-
-		// It's a file
-		if (!this.files.has(path)) {
-			throw new Error(`Path not found: ${command.path}`);
-		}
-
-		const content = this.files.get(path)!;
-		const lines = content.split('\n');
-
-		let displayLines = lines;
-		let startNum = 1;
-
-		if (command.view_range && command.view_range.length === 2) {
-			const startLine = Math.max(1, command.view_range[0]!) - 1;
-			const endLine = command.view_range[1] === -1 ? lines.length : command.view_range[1];
-			displayLines = lines.slice(startLine, endLine);
-			startNum = startLine + 1;
-		}
-
-		const numberedLines = displayLines.map(
-			(line, i) => `${String(i + startNum).padStart(4, ' ')}: ${line}`
-		);
-
-		return numberedLines.join('\n');
-	}
-
-	async create(command: Extract<BetaMemoryTool20250818Command, { command: 'create' }>): Promise<string> {
-		console.log('Creating memory')
-		const path = this.validatePath(command.path);
-		this.files.set(path, command.file_text);
-		return `File created successfully at ${command.path}`;
-	}
-
-	async str_replace(command: Extract<BetaMemoryTool20250818Command, { command: 'str_replace' }>): Promise<string> {
-		const path = this.validatePath(command.path);
-
-		if (!this.files.has(path)) {
-			throw new Error(`File not found: ${command.path}`);
-		}
-
-		const content = this.files.get(path)!;
-		const count = content.split(command.old_str).length - 1;
-
-		if (count === 0) {
-			throw new Error(`Text not found in ${command.path}`);
-		} else if (count > 1) {
-			throw new Error(`Text appears ${count} times in ${command.path}. Must be unique.`);
-		}
-
-		const newContent = content.replace(command.old_str, command.new_str);
-		this.files.set(path, newContent);
-		return `File ${command.path} has been edited`;
-	}
-
-	async insert(command: Extract<BetaMemoryTool20250818Command, { command: 'insert' }>): Promise<string> {
-		const path = this.validatePath(command.path);
-
-		if (!this.files.has(path)) {
-			throw new Error(`File not found: ${command.path}`);
-		}
-
-		const content = this.files.get(path)!;
-		const lines = content.split('\n');
-
-		if (command.insert_line < 0 || command.insert_line > lines.length) {
-			throw new Error(`Invalid insert_line ${command.insert_line}. Must be 0-${lines.length}`);
-		}
-
-		lines.splice(command.insert_line, 0, command.insert_text.replace(/\n$/, ''));
-		this.files.set(path, lines.join('\n'));
-		return `Text inserted at line ${command.insert_line} in ${command.path}`;
-	}
-
-	async delete(command: Extract<BetaMemoryTool20250818Command, { command: 'delete' }>): Promise<string> {
-		const path = this.validatePath(command.path);
-
-		if (command.path === '/memories' || command.path === '/memories/') {
-			throw new Error('Cannot delete the /memories directory itself');
-		}
-
-		if (!this.files.has(path)) {
-			// Check if it's a directory
-			let hasChildren = false;
-			for (const filePath of this.files.keys()) {
-				if (filePath.startsWith(path + '/')) {
-					hasChildren = true;
-					this.files.delete(filePath);
-				}
-			}
-
-			if (!hasChildren) {
-				throw new Error(`Path not found: ${command.path}`);
-			}
-
-			return `Directory deleted: ${command.path}`;
-		}
-
-		this.files.delete(path);
-		return `File deleted: ${command.path}`;
-	}
-
-	async rename(command: Extract<BetaMemoryTool20250818Command, { command: 'rename' }>): Promise<string> {
-		const oldPath = this.validatePath(command.old_path);
-		const newPath = this.validatePath(command.new_path);
-
-		if (!this.files.has(oldPath)) {
-			throw new Error(`Source path not found: ${command.old_path}`);
-		}
-
-		if (this.files.has(newPath)) {
-			throw new Error(`Destination already exists: ${command.new_path}`);
-		}
-
-		const content = this.files.get(oldPath)!;
-		this.files.delete(oldPath);
-		this.files.set(newPath, content);
-		return `Renamed ${command.old_path} to ${command.new_path}`;
-	}
 }
 
 // Default fallback models when API is unavailable
@@ -265,16 +62,8 @@ export class ClaudeAgent implements INodeType {
 		defaults: {
 			name: 'Claude Agent',
 		},
-		inputs: [
-			NodeConnectionTypes.Main,
-			{
-				displayName: 'Memory (Optional)',
-				type: NodeConnectionTypes.Main,
-				required: false,
-			},
-		],
+		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
-		inputNames: ['Main Input', 'Memory'],
 		properties: [
 			{
 				displayName: 'Prompt',
@@ -325,13 +114,6 @@ export class ClaudeAgent implements INodeType {
 						type: 'boolean',
 						default: false,
 						description: 'Whether to allow the agent to spawn subagents for complex tasks',
-					},
-					{
-						displayName: 'Enable Memory',
-						name: 'enableMemory',
-						type: 'boolean',
-						default: true,
-						description: 'Whether to allow the agent to maintain memory (stored in workflow static data)',
 					},
 					{
 						displayName: 'Max Turns',
@@ -398,36 +180,6 @@ export class ClaudeAgent implements INodeType {
 			},
 		},
 	};
-
-	/**
-	 * Parse memory string from the memory input connection
-	 * Returns the memory JSON string, or undefined if no memory input
-	 */
-	private static parseMemoryInput(memoryItems: INodeExecutionData[]): string | undefined {
-		if (memoryItems.length === 0) {
-			return undefined;
-		}
-
-		// Get memory from the first item
-		const item = memoryItems[0];
-		const json = item.json;
-
-		// Support multiple formats:
-		// 1. Direct memory string: { memory: "..." }
-		if (typeof json.memory === 'string') {
-			return json.memory;
-		}
-
-		// 2. claudeAgent output format: { claudeAgent: { memory: "..." } }
-		if (json.claudeAgent && typeof json.claudeAgent === 'object') {
-			const agent = json.claudeAgent as any;
-			if (typeof agent.memory === 'string') {
-				return agent.memory;
-			}
-		}
-
-		return undefined;
-	}
 
 	/**
 	 * Build the array of allowed tools based on node options
@@ -526,8 +278,7 @@ export class ClaudeAgent implements INodeType {
 		allowedTools: string[],
 		model: string,
 		options: NodeOptions,
-		captureHook: (input_data: HookInput) => Promise<{}>,
-		memoryTool?: any
+		captureHook: (input_data: HookInput) => Promise<{}>
 	): Options {
 		const agentOptions: Options = {
 			allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
@@ -541,11 +292,6 @@ export class ClaudeAgent implements INodeType {
 				],
 			},
 		};
-
-		// Add memory tool if provided
-		if (memoryTool) {
-			(agentOptions as any).tools = [memoryTool];
-		}
 
 		return agentOptions;
 	}
@@ -609,7 +355,6 @@ export class ClaudeAgent implements INodeType {
 		inputItem: INodeExecutionData,
 		executionResult: AgentExecutionResult,
 		capturedData: CapturedData,
-		memoryState: string | undefined,
 		model: string,
 		options: NodeOptions,
 		itemIndex: number
@@ -624,7 +369,6 @@ export class ClaudeAgent implements INodeType {
 					executionTime: executionResult.executionTime,
 					tokensUsed: executionResult.tokensUsed,
 					...(capturedData.todos.length > 0 && { todos: capturedData.todos }),
-					...(memoryState && { memory: memoryState }),
 					...(capturedData.subagents.length > 0 && { subagents: capturedData.subagents }),
 					...(options.includeToolDetails &&
 						capturedData.toolsUsed.length > 0 && { toolsUsed: capturedData.toolsUsed }),
@@ -637,18 +381,6 @@ export class ClaudeAgent implements INodeType {
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
-
-		// Read memory input from second connection (if provided)
-		let memoryInputItems: INodeExecutionData[];
-		try {
-			memoryInputItems = this.getInputData(1);
-		} catch (error) {
-			// No memory input connected, which is fine
-			memoryInputItems = [];
-		}
-
-		// Parse memory string from input
-		const initialMemoryState = ClaudeAgent.parseMemoryInput(memoryInputItems);
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
@@ -664,18 +396,6 @@ export class ClaudeAgent implements INodeType {
 					subagents: [],
 				};
 
-				// Setup memory tool if enabled
-				let memoryTool: any = undefined;
-				let inMemoryTool: InMemoryMemoryTool | undefined = undefined;
-
-				if (options.enableMemory) {
-					console.log('Creating memory tool')
-					// Create in-memory storage with initial state
-					inMemoryTool = new InMemoryMemoryTool(initialMemoryState);
-					// Create the beta memory tool
-					memoryTool = betaMemoryTool(inMemoryTool);
-				}
-
 				// Build configuration
 				const allowedTools = ClaudeAgent.buildAllowedTools(options);
 				const captureHook = ClaudeAgent.createCaptureHook(capturedData, options);
@@ -684,22 +404,17 @@ export class ClaudeAgent implements INodeType {
 					allowedTools,
 					model,
 					options,
-					captureHook,
-					memoryTool
+					captureHook
 				);
 
 				// Execute the agent
 				const executionResult = await ClaudeAgent.processAgentMessages(finalPrompt, agentOptions);
-
-				// Serialize memory state if memory tool was used
-				const finalMemoryState = (inMemoryTool && inMemoryTool.hasMemory()) ? inMemoryTool.serialize() : undefined;
 
 				// Build and add output item
 				const outputItem = ClaudeAgent.buildOutputItem(
 					items[itemIndex],
 					executionResult,
 					capturedData,
-					finalMemoryState,
 					model,
 					options,
 					itemIndex
