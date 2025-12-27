@@ -83,12 +83,6 @@ export class ClaudeAgent implements INodeType {
 		],
 		outputs: [NodeConnectionTypes.Main],
 		inputNames: ['Main Input', 'Memory'],
-		credentials: [
-			{
-				name: 'claudeAgentApi',
-				required: true,
-			},
-		],
 		properties: [
 			{
 				displayName: 'Prompt',
@@ -185,11 +179,6 @@ export class ClaudeAgent implements INodeType {
 		loadOptions: {
 			async getModels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				try {
-					// Get credentials
-					const credentials = await this.getCredentials('claudeAgentApi');
-					if (!credentials || !credentials.apiKey) {
-						return DEFAULT_MODEL_OPTIONS;
-					}
 
 					try {
 						// Create a minimal query session to fetch models
@@ -544,12 +533,9 @@ export class ClaudeAgent implements INodeType {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
 
-		// Get credentials and set API key
-		const credentials = await this.getCredentials('claudeAgentApi');
-		process.env.ANTHROPIC_API_KEY = credentials.apiKey as string;
 
 		// Read memory input from second connection (if provided)
-		let memoryInputItems: INodeExecutionData[] = [];
+		let memoryInputItems: INodeExecutionData[];
 		try {
 			memoryInputItems = this.getInputData(1);
 		} catch (error) {
