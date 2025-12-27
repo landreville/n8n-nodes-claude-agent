@@ -1,0 +1,18 @@
+{
+	"node": "n8n-nodes-claude-agent",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["AI", "Transform"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://docs.anthropic.com/en/api/getting-started"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/anthropics/claude-agent-sdk"
+			}
+		]
+	}
+}

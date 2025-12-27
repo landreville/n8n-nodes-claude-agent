@@ -1,9 +1,9 @@
 {
-	"name": "n8n-nodes-<...>",
+	"name": "n8n-nodes-claude-agent",
 	"version": "0.1.0",
 	"description": "",
 	"license": "MIT",
-	"homepage": "",
+	"homepage": "https://github.com/landreville/n8n-nodes-claude-agent",
 	"keywords": [
 		"n8n-community-node-package"
 	],
@@ -13,7 +13,7 @@
 	},
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/<...>/n8n-nodes-<...>.git"
+		"url": "https://github.com/landreville/n8n-nodes-claude-agent.git"
 	},
 	"scripts": {
 		"build": "n8n-node build",
@@ -31,20 +31,22 @@
 		"n8nNodesApiVersion": 1,
 		"strict": true,
 		"credentials": [
-			"dist/credentials/GithubIssuesApi.credentials.js",
-			"dist/credentials/GithubIssuesOAuth2Api.credentials.js"
+			"dist/credentials/ClaudeAgentApi.credentials.js"
 		],
 		"nodes": [
-			"dist/nodes/GithubIssues/GithubIssues.node.js",
-			"dist/nodes/Example/Example.node.js"
+			"dist/nodes/ClaudeAgent/ClaudeAgent.node.js"
 		]
 	},
 	"devDependencies": {
-		"@n8n/node-cli": "*",
+		"@n8n/node-cli": "^0.17.0",
+		"@types/node": "^25.0.3",
 		"eslint": "9.32.0",
 		"prettier": "3.6.2",
 		"release-it": "^19.0.4",
 		"typescript": "5.9.2"
+	},
+	"dependencies": {
+		"@anthropic-ai/claude-agent-sdk": "^0.1.76"
 	},
 	"peerDependencies": {
 		"n8n-workflow": "*"
