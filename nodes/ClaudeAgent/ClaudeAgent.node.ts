@@ -1,6 +1,8 @@
 import type {
 	IExecuteFunctions,
+	ILoadOptionsFunctions,
 	INodeExecutionData,
+	INodePropertyOptions,
 	INodeType,
 	INodeTypeDescription,
 } from 'n8n-workflow';
@@ -8,10 +10,16 @@ import { NodeConnectionTypes, NodeOperationError } from 'n8n-workflow';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Options, HookCallbackMatcher, HookInput } from '@anthropic-ai/claude-agent-sdk';
 
+interface MemoryItem {
+	path: string;
+	content: string;
+	timestamp?: string;
+}
+
 interface CapturedData {
 	todos: Array<{ content: string; status: string; activeForm: string }>;
 	memory: {
-		items: Array<{ path: string; content: string }>;
+		items: Array<MemoryItem>;
 		operations: Array<{ operation: string; path: string; timestamp: string }>;
 	};
 	toolsUsed: Array<{ name: string; input: any; output: any; timestamp: string }>;
@@ -35,6 +43,25 @@ interface AgentExecutionResult {
 	executionTime: number;
 }
 
+// Default fallback models when API is unavailable
+const DEFAULT_MODEL_OPTIONS: INodePropertyOptions[] = [
+	{
+		name: 'Sonnet (Recommended)',
+		value: 'sonnet',
+		description: 'Most capable model for complex tasks',
+	},
+	{
+		name: 'Opus',
+		value: 'opus',
+		description: 'Highest performance for advanced reasoning',
+	},
+	{
+		name: 'Haiku',
+		value: 'haiku',
+		description: 'Fastest model for simple tasks',
+	},
+];
+
 export class ClaudeAgent implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Claude Agent',
@@ -46,8 +73,16 @@ export class ClaudeAgent implements INodeType {
 		defaults: {
 			name: 'Claude Agent',
 		},
-		inputs: [NodeConnectionTypes.Main],
+		inputs: [
+			NodeConnectionTypes.Main,
+			{
+				displayName: 'Memory (Optional)',
+				type: NodeConnectionTypes.Main,
+				required: false,
+			},
+		],
 		outputs: [NodeConnectionTypes.Main],
+		inputNames: ['Main Input', 'Memory'],
 		credentials: [
 			{
 				name: 'claudeAgentApi',
@@ -71,20 +106,9 @@ export class ClaudeAgent implements INodeType {
 				displayName: 'Model',
 				name: 'model',
 				type: 'options',
-				options: [
-					{
-						name: 'Sonnet 4.5 (Recommended)',
-						value: 'sonnet',
-					},
-					{
-						name: 'Opus 4.5',
-						value: 'opus',
-					},
-					{
-						name: 'Haiku 3.5',
-						value: 'haiku',
-					},
-				],
+				typeOptions: {
+					loadOptionsMethod: 'getModels',
+				},
 				default: 'sonnet',
 				description: 'The Claude model to use for the agent',
 			},
@@ -156,6 +180,114 @@ export class ClaudeAgent implements INodeType {
 			},
 		],
 	};
+
+	methods = {
+		loadOptions: {
+			async getModels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
+				try {
+					// Get credentials
+					const credentials = await this.getCredentials('claudeAgentApi');
+					if (!credentials || !credentials.apiKey) {
+						return DEFAULT_MODEL_OPTIONS;
+					}
+
+					try {
+						// Create a minimal query session to fetch models
+						const querySession = query({
+							prompt: '', // Empty prompt, we just need the session
+							options: {
+								maxTurns: 0, // Don't actually execute
+							},
+						});
+
+						// Fetch available models
+						const models = await querySession.supportedModels();
+
+						// Convert to N8N options format
+						return models.map(model => ({
+							name: model.displayName,
+							value: model.value,
+							description: model.description,
+						}));
+					} catch (error) {
+						return DEFAULT_MODEL_OPTIONS;
+					}
+				} catch (error) {
+					return DEFAULT_MODEL_OPTIONS;
+				}
+			},
+		},
+	};
+
+	/**
+	 * Parse memory items from the memory input connection
+	 */
+	private static parseMemoryInput(memoryItems: INodeExecutionData[]): MemoryItem[] {
+		const memories: MemoryItem[] = [];
+
+		for (const item of memoryItems) {
+			const json = item.json;
+
+			// Support multiple formats:
+			// 1. Direct format: { path: string, content: string, timestamp?: string }
+			if (json.path && json.content) {
+				memories.push({
+					path: json.path as string,
+					content: json.content as string,
+					timestamp: json.timestamp as string | undefined,
+				});
+			}
+			// 2. Nested in memory object: { memory: { path, content, timestamp } }
+			else if (json.memory && typeof json.memory === 'object') {
+				const mem = json.memory as any;
+				if (mem.path && mem.content) {
+					memories.push({
+						path: mem.path,
+						content: mem.content,
+						timestamp: mem.timestamp,
+					});
+				}
+			}
+			// 3. Array of memory items: { memories: [{ path, content }] }
+			else if (json.memories && Array.isArray(json.memories)) {
+				for (const mem of json.memories) {
+					if (mem.path && mem.content) {
+						memories.push({
+							path: mem.path,
+							content: mem.content,
+							timestamp: mem.timestamp,
+						});
+					}
+				}
+			}
+			// 4. Legacy format from previous output: { claudeAgent: { memory: { items: [...] } } }
+			else if (json.claudeAgent && typeof json.claudeAgent === 'object') {
+				const agent = json.claudeAgent as any;
+				if (agent.memory && agent.memory.items && Array.isArray(agent.memory.items)) {
+					memories.push(...agent.memory.items);
+				}
+			}
+		}
+
+		return memories;
+	}
+
+	/**
+	 * Initialize memory context from memory items
+	 * Returns a formatted string to include in the system prompt
+	 */
+	private static buildMemoryContext(memoryItems: MemoryItem[]): string {
+		if (memoryItems.length === 0) {
+			return '';
+		}
+
+		const memoryLines = memoryItems.map(item => {
+			const timestamp = item.timestamp ? ` (updated: ${item.timestamp})` : '';
+			return `### ${item.path}${timestamp}\n${item.content}`;
+		});
+
+		return `\n\n## Memory Context\n\nThe following information has been stored in memory from previous interactions:\n\n${memoryLines.join('\n\n---\n\n')}`;
+	}
 
 	/**
 	 * Build the array of allowed tools based on node options
@@ -241,13 +373,22 @@ export class ClaudeAgent implements INodeType {
 	}
 
 	/**
-	 * Build the final prompt with optional custom context
+	 * Build the final prompt with optional custom context and memory
 	 */
-	private static buildFinalPrompt(prompt: string, options: NodeOptions): string {
+	private static buildFinalPrompt(prompt: string, options: NodeOptions, memoryContext: string = ''): string {
+		let finalPrompt = prompt;
+
+		// Add custom context if provided
 		if (options.customContext) {
-			return `${options.customContext}\n\n${prompt}`;
+			finalPrompt = `${options.customContext}\n\n${finalPrompt}`;
 		}
-		return prompt;
+
+		// Add memory context if provided
+		if (memoryContext) {
+			finalPrompt = `${finalPrompt}${memoryContext}`;
+		}
+
+		return finalPrompt;
 	}
 
 	/**
@@ -259,7 +400,7 @@ export class ClaudeAgent implements INodeType {
 			'opus': 'claude-opus-4-20250514',
 			'haiku': 'claude-3-5-haiku-20241022',
 		};
-		return modelMap[model];
+		return modelMap[model] || model; // Return as-is if already a full identifier
 	}
 
 	/**
@@ -338,16 +479,42 @@ export class ClaudeAgent implements INodeType {
 	}
 
 	/**
+	 * Merge initial memory items with newly captured memory items
+	 */
+	private static mergeMemoryItems(initialMemory: MemoryItem[], capturedMemory: MemoryItem[]): MemoryItem[] {
+		const memoryMap = new Map<string, MemoryItem>();
+
+		// Add initial memory
+		for (const item of initialMemory) {
+			memoryMap.set(item.path, item);
+		}
+
+		// Add/update with captured memory (newer items override)
+		for (const item of capturedMemory) {
+			memoryMap.set(item.path, {
+				...item,
+				timestamp: item.timestamp || new Date().toISOString(),
+			});
+		}
+
+		return Array.from(memoryMap.values());
+	}
+
+	/**
 	 * Build the output item with agent results and captured data
 	 */
 	private static buildOutputItem(
 		inputItem: INodeExecutionData,
 		executionResult: AgentExecutionResult,
 		capturedData: CapturedData,
+		initialMemory: MemoryItem[],
 		model: string,
 		options: NodeOptions,
 		itemIndex: number
 	): INodeExecutionData {
+		// Merge initial memory with captured memory
+		const finalMemoryItems = ClaudeAgent.mergeMemoryItems(initialMemory, capturedData.memory.items);
+
 		return {
 			json: {
 				...inputItem.json,
@@ -358,7 +525,12 @@ export class ClaudeAgent implements INodeType {
 					executionTime: executionResult.executionTime,
 					tokensUsed: executionResult.tokensUsed,
 					...(capturedData.todos.length > 0 && { todos: capturedData.todos }),
-					...(capturedData.memory.operations.length > 0 && { memory: capturedData.memory }),
+					...(finalMemoryItems.length > 0 && {
+						memory: {
+							items: finalMemoryItems,
+							operations: capturedData.memory.operations,
+						},
+					}),
 					...(capturedData.subagents.length > 0 && { subagents: capturedData.subagents }),
 					...(options.includeToolDetails &&
 						capturedData.toolsUsed.length > 0 && { toolsUsed: capturedData.toolsUsed }),
@@ -375,6 +547,19 @@ export class ClaudeAgent implements INodeType {
 		// Get credentials and set API key
 		const credentials = await this.getCredentials('claudeAgentApi');
 		process.env.ANTHROPIC_API_KEY = credentials.apiKey as string;
+
+		// Read memory input from second connection (if provided)
+		let memoryInputItems: INodeExecutionData[] = [];
+		try {
+			memoryInputItems = this.getInputData(1);
+		} catch (error) {
+			// No memory input connected, which is fine
+			memoryInputItems = [];
+		}
+
+		// Parse memory items from input
+		const initialMemory = ClaudeAgent.parseMemoryInput(memoryInputItems);
+		const memoryContext = ClaudeAgent.buildMemoryContext(initialMemory);
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
 			try {
@@ -397,7 +582,7 @@ export class ClaudeAgent implements INodeType {
 				// Build configuration
 				const allowedTools = ClaudeAgent.buildAllowedTools(options);
 				const captureHook = ClaudeAgent.createCaptureHook(capturedData, options);
-				const finalPrompt = ClaudeAgent.buildFinalPrompt(prompt, options);
+				const finalPrompt = ClaudeAgent.buildFinalPrompt(prompt, options, memoryContext);
 				const agentOptions = ClaudeAgent.buildAgentOptions(allowedTools, model, options, captureHook);
 
 				// Execute the agent
@@ -408,6 +593,7 @@ export class ClaudeAgent implements INodeType {
 					items[itemIndex],
 					executionResult,
 					capturedData,
+					initialMemory,
 					model,
 					options,
 					itemIndex
