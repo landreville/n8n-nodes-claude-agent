@@ -1,15 +1,19 @@
 {
 	"name": "n8n-nodes-claude-agent",
 	"version": "0.1.0",
-	"description": "",
+	"description": "n8n node for running AI agents powered by Claude Agent SDK with Web Search and Web Fetch capabilities",
 	"license": "MIT",
 	"homepage": "https://github.com/landreville/n8n-nodes-claude-agent",
 	"keywords": [
-		"n8n-community-node-package"
+		"n8n-community-node-package",
+		"n8n",
+		"claude",
+		"ai",
+		"agent",
+		"anthropic"
 	],
 	"author": {
-		"name": "",
-		"email": ""
+		"name": "Landreville"
 	},
 	"repository": {
 		"type": "git",
@@ -32,7 +36,7 @@
 	],
 	"n8n": {
 		"n8nNodesApiVersion": 1,
-		"strict": true,
+		"strict": false,
 		"nodes": [
 			"dist/nodes/ClaudeAgent/ClaudeAgent.node.js"
 		]

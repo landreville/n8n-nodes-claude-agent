@@ -11,7 +11,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Options, HookCallbackMatcher, HookInput } from '@anthropic-ai/claude-agent-sdk';
 
 interface CapturedData {
-	toolsUsed: Array<{ name: string; input: any; output: any; timestamp: string }>;
+	toolsUsed: Array<{ name: string; input: unknown; output: unknown; timestamp: string }>;
 }
 
 interface NodeOptions {
@@ -27,6 +27,13 @@ interface AgentExecutionResult {
 	turns: number;
 	tokensUsed: number;
 	executionTime: number;
+}
+
+interface AgentMessage {
+	type?: string;
+	content?: Array<{ type: string; text?: string }>;
+	result?: string;
+	usage?: { total_tokens?: number };
 }
 
 // Default fallback models when API is unavailable
@@ -75,14 +82,14 @@ export class ClaudeAgent implements INodeType {
 				description: 'The task or question for the Claude Agent to complete',
 			},
 			{
-				displayName: 'Model',
+				displayName: 'Model Name or ID',
 				name: 'model',
 				type: 'options',
 				typeOptions: {
 					loadOptionsMethod: 'getModels',
 				},
-				default: 'sonnet',
-				description: 'The Claude model to use for the agent',
+				default: '',
+				description: 'The Claude model to use for the agent. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Options',
@@ -91,31 +98,6 @@ export class ClaudeAgent implements INodeType {
 				placeholder: 'Add Option',
 				default: {},
 				options: [
-					{
-						displayName: 'Enable Web Search',
-						name: 'enableWebSearch',
-						type: 'boolean',
-						default: false,
-						description: 'Whether to allow the agent to search the web for information',
-					},
-					{
-						displayName: 'Enable Web Fetch',
-						name: 'enableWebFetch',
-						type: 'boolean',
-						default: false,
-						description: 'Whether to allow the agent to fetch and parse web pages',
-					},
-					{
-						displayName: 'Max Turns',
-						name: 'maxTurns',
-						type: 'number',
-						default: 10,
-						description: 'Maximum number of agent iterations (tool use cycles)',
-						typeOptions: {
-							minValue: 1,
-							maxValue: 50,
-						},
-					},
 					{
 						displayName: 'Custom Context',
 						name: 'customContext',
@@ -128,43 +110,65 @@ export class ClaudeAgent implements INodeType {
 						description: 'Additional context or instructions to provide to the agent',
 					},
 					{
+						displayName: 'Enable Web Fetch',
+						name: 'enableWebFetch',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to allow the agent to fetch and parse web pages',
+					},
+					{
+						displayName: 'Enable Web Search',
+						name: 'enableWebSearch',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to allow the agent to search the web for information',
+					},
+					{
 						displayName: 'Include Tool Details',
 						name: 'includeToolDetails',
 						type: 'boolean',
 						default: false,
 						description: 'Whether to include detailed tool execution information in the output',
 					},
+					{
+						displayName: 'Max Turns',
+						name: 'maxTurns',
+						type: 'number',
+						default: 10,
+						description: 'Maximum number of agent iterations (tool use cycles)',
+						typeOptions: {
+							minValue: 1,
+							maxValue: 50,
+						},
+					},
 				],
 			},
 		],
+		usableAsTool: true,
 	};
 
 	methods = {
 		loadOptions: {
 			async getModels(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
 				try {
-					try {
-						// Create a minimal query session to fetch models
-						const querySession = query({
-							prompt: '', // Empty prompt, we just need the session
-							options: {
-								maxTurns: 0, // Don't actually execute
-							},
-						});
+					// Create a minimal query session to fetch models
+					const querySession = query({
+						prompt: '', // Empty prompt, we just need the session
+						options: {
+							maxTurns: 0, // Don't actually execute
+						},
+					});
 
 
-						// Fetch available models
-						const models = await querySession.supportedModels();
-						// Convert to N8N options format
-						return models.map(model => ({
-							name: model.displayName,
-							value: model.value,
-							description: model.description,
-						}));
-					} catch (error) {
-						return DEFAULT_MODEL_OPTIONS;
-					}
-				} catch (error) {
+					// Fetch available models
+					const models = await querySession.supportedModels();
+					// Convert to N8N options format
+					return models.map(model => ({
+						name: model.displayName,
+						value: model.value,
+						description: model.description,
+					}));
+				} catch {
 					return DEFAULT_MODEL_OPTIONS;
 				}
 			},
@@ -248,7 +252,7 @@ export class ClaudeAgent implements INodeType {
 		allowedTools: string[],
 		model: string,
 		options: NodeOptions,
-		captureHook: (input_data: HookInput) => Promise<{}>
+		captureHook: (input_data: HookInput) => Promise<Record<string, unknown>>
 	): Options {
 		return {
 			allowedTools: allowedTools.length > 0 ? allowedTools : undefined,
@@ -281,28 +285,30 @@ export class ClaudeAgent implements INodeType {
 			prompt: finalPrompt,
 			options: agentOptions,
 		})) {
+			const msg = message as AgentMessage;
+
 			// Track turns
-			if ((message as any).type === 'agent_turn') {
+			if (msg.type === 'agent_turn') {
 				turns++;
 			}
 
 			// Capture final response
-			if ((message as any).type === 'text' && (message as any).content) {
-				for (const block of (message as any).content) {
-					if (block.type === 'text') {
+			if (msg.type === 'text' && msg.content) {
+				for (const block of msg.content) {
+					if (block.type === 'text' && block.text) {
 						agentResponse += block.text;
 					}
 				}
 			}
 
 			// Check for result in message
-			if ((message as any).result) {
-				agentResponse = (message as any).result;
+			if (msg.result) {
+				agentResponse = msg.result;
 			}
 
 			// Track token usage if available
-			if ((message as any).usage) {
-				tokensUsed = (message as any).usage.total_tokens || 0;
+			if (msg.usage?.total_tokens) {
+				tokensUsed = msg.usage.total_tokens;
 			}
 		}
 

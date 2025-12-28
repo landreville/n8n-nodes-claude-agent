@@ -1,10 +1,34 @@
 import { ClaudeAgent } from '../../../nodes/ClaudeAgent/ClaudeAgent.node';
-import type { ILoadOptionsFunctions } from 'n8n-workflow';
+import type { ILoadOptionsFunctions, INodePropertyOptions } from 'n8n-workflow';
 
 // Mock the Claude Agent SDK
 jest.mock('@anthropic-ai/claude-agent-sdk', () => ({
 	query: jest.fn(),
 }));
+
+// Type to access private static methods for testing
+type ClaudeAgentStatic = typeof ClaudeAgent & {
+	buildAllowedTools: (options: Record<string, unknown>) => string[];
+	buildFinalPrompt: (prompt: string, options: Record<string, unknown>) => string;
+	getModelIdentifier: (model: string) => string | undefined;
+	buildAgentOptions: (
+		allowedTools: string[],
+		model: string,
+		options: Record<string, unknown>,
+		captureHook: () => void
+	) => Record<string, unknown>;
+};
+
+// Helper types for node property testing
+interface NodePropertyWithTypeOptions extends INodePropertyOptions {
+	typeOptions?: {
+		loadOptionsMethod?: string;
+	};
+}
+
+interface NodePropertyWithOptions extends INodePropertyOptions {
+	options?: Array<{ name: string }>;
+}
 
 describe('ClaudeAgent', () => {
 	let claudeAgent: ClaudeAgent;
@@ -21,7 +45,7 @@ describe('ClaudeAgent', () => {
 					enableWebFetch: false,
 									};
 
-				const result = (ClaudeAgent as any).buildAllowedTools(options);
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildAllowedTools(options);
 
 				expect(result).toEqual([]);
 			});
@@ -32,7 +56,7 @@ describe('ClaudeAgent', () => {
 					enableWebFetch: false,
 									};
 
-				const result = (ClaudeAgent as any).buildAllowedTools(options);
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildAllowedTools(options);
 
 				expect(result).toContain('WebSearch');
 				expect(result).toHaveLength(1);
@@ -44,7 +68,7 @@ describe('ClaudeAgent', () => {
 					enableWebFetch: true,
 									};
 
-				const result = (ClaudeAgent as any).buildAllowedTools(options);
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildAllowedTools(options);
 
 				expect(result).toContain('WebFetch');
 				expect(result).toHaveLength(1);
@@ -56,7 +80,7 @@ describe('ClaudeAgent', () => {
 					enableWebFetch: false,
 				};
 
-				const result = (ClaudeAgent as any).buildAllowedTools(options);
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildAllowedTools(options);
 
 			expect(result).toHaveLength(0);
 			});
@@ -67,7 +91,7 @@ describe('ClaudeAgent', () => {
 					enableWebFetch: true,
 									};
 
-				const result = (ClaudeAgent as any).buildAllowedTools(options);
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildAllowedTools(options);
 
 				expect(result).toContain('WebSearch');
 				expect(result).toContain('WebFetch');
@@ -80,7 +104,7 @@ describe('ClaudeAgent', () => {
 				const prompt = 'Test prompt';
 				const options = {};
 
-				const result = (ClaudeAgent as any).buildFinalPrompt(prompt, options);
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildFinalPrompt(prompt, options);
 
 				expect(result).toBe('Test prompt');
 			});
@@ -91,7 +115,7 @@ describe('ClaudeAgent', () => {
 					customContext: 'Custom context',
 				};
 
-				const result = (ClaudeAgent as any).buildFinalPrompt(prompt, options);
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildFinalPrompt(prompt, options);
 
 				expect(result).toBe('Custom context\n\nTest prompt');
 			});
@@ -99,33 +123,33 @@ describe('ClaudeAgent', () => {
 
 		describe('getModelIdentifier', () => {
 			it('should map sonnet to full identifier', () => {
-				const result = (ClaudeAgent as any).getModelIdentifier('sonnet');
+				const result = (ClaudeAgent as ClaudeAgentStatic).getModelIdentifier('sonnet');
 
 				expect(result).toBe('claude-sonnet-4-5-20250929');
 			});
 
 			it('should map opus to full identifier', () => {
-				const result = (ClaudeAgent as any).getModelIdentifier('opus');
+				const result = (ClaudeAgent as ClaudeAgentStatic).getModelIdentifier('opus');
 
 				expect(result).toBe('claude-opus-4-20250514');
 			});
 
 			it('should map haiku to full identifier', () => {
-				const result = (ClaudeAgent as any).getModelIdentifier('haiku');
+				const result = (ClaudeAgent as ClaudeAgentStatic).getModelIdentifier('haiku');
 
 				expect(result).toBe('claude-3-5-haiku-20241022');
 			});
 
 			it('should return as-is for already full identifier', () => {
 				const fullId = 'claude-sonnet-4-5-20250929';
-				const result = (ClaudeAgent as any).getModelIdentifier(fullId);
+				const result = (ClaudeAgent as ClaudeAgentStatic).getModelIdentifier(fullId);
 
 				expect(result).toBe(fullId);
 			});
 
 			it('should return as-is for unknown model', () => {
 				const unknown = 'unknown-model';
-				const result = (ClaudeAgent as any).getModelIdentifier(unknown);
+				const result = (ClaudeAgent as ClaudeAgentStatic).getModelIdentifier(unknown);
 
 				expect(result).toBe(unknown);
 			});
@@ -138,7 +162,7 @@ describe('ClaudeAgent', () => {
 				const options = { maxTurns: 5 };
 				const captureHook = jest.fn();
 
-				const result = (ClaudeAgent as any).buildAgentOptions(
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildAgentOptions(
 					allowedTools,
 					model,
 					options,
@@ -152,7 +176,7 @@ describe('ClaudeAgent', () => {
 			});
 
 			it('should use default maxTurns when not provided', () => {
-				const result = (ClaudeAgent as any).buildAgentOptions(
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildAgentOptions(
 					[],
 					'sonnet',
 					{},
@@ -163,7 +187,7 @@ describe('ClaudeAgent', () => {
 			});
 
 			it('should set allowedTools to undefined for empty array', () => {
-				const result = (ClaudeAgent as any).buildAgentOptions(
+				const result = (ClaudeAgent as ClaudeAgentStatic).buildAgentOptions(
 					[],
 					'sonnet',
 					{},
@@ -217,23 +241,23 @@ describe('ClaudeAgent', () => {
 		it('should have model property with loadOptions', () => {
 			const modelProp = claudeAgent.description.properties.find(
 				(p) => p.name === 'model'
-			);
+			) as NodePropertyWithTypeOptions;
 
 			expect(modelProp).toBeDefined();
-			expect(modelProp!.type).toBe('options');
-			expect((modelProp as any).typeOptions.loadOptionsMethod).toBe('getModels');
+			expect(modelProp.type).toBe('options');
+			expect(modelProp.typeOptions?.loadOptionsMethod).toBe('getModels');
 		});
 
 		it('should have options collection with expected fields', () => {
 			const optionsProp = claudeAgent.description.properties.find(
 				(p) => p.name === 'options'
-			);
+			) as NodePropertyWithOptions;
 
 			expect(optionsProp).toBeDefined();
-			expect(optionsProp!.type).toBe('collection');
+			expect(optionsProp.type).toBe('collection');
 
-			const options = (optionsProp as any).options;
-			const optionNames = options.map((o: any) => o.name);
+			const options = optionsProp.options ?? [];
+			const optionNames = options.map((o) => o.name);
 
 			expect(optionNames).toContain('enableWebSearch');
 			expect(optionNames).toContain('enableWebFetch');
