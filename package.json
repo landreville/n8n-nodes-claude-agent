@@ -1,6 +1,6 @@
 {
 	"name": "@landreville/n8n-nodes-claude-agent",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "n8n node for running AI agents powered by Claude Agent SDK with Web Search and Web Fetch capabilities",
 	"license": "MIT",
 	"homepage": "https://github.com/landreville/n8n-nodes-claude-agent",
